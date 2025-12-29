@@ -391,6 +391,7 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 			return ctx.Err()
 		default:
 		}
+
 		token := scanner.Text()
 		if token == "" {
 			break
@@ -407,8 +408,14 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 			n += len(token)
 			continue
 		}
+
 		n += len(token)
-		out <- token
+
+		select {
+		case out <- token:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	if err := scanner.Err(); err != nil && r.FailOnError {

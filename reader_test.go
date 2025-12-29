@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stringReader(s string) io.Reader {
@@ -550,6 +551,62 @@ func TestDefaultNormalizer(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("DefaultNormalizer(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestReader_StreamTokens(t *testing.T) {
+	input := "hello\nworld\nthis\nis\ngo"
+	r := NewReader().FromString(input)
+	out := make(chan string, 10) // buffer pour ne pas bloquer
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	go func() {
+		if err := r.StreamTokens(ctx, out); err != nil {
+			t.Errorf("StreamTokens returned error: %v", err)
+		}
+		close(out)
+	}()
+
+	expected := strings.Split(input, "\n")
+	i := 0
+	for token := range out {
+		if i >= len(expected) {
+			t.Errorf("Received more tokens than expected: %v", token)
+			break
+		}
+		if token != expected[i] {
+			t.Errorf("Token mismatch at index %d: got %q, want %q", i, token, expected[i])
+		}
+		i++
+	}
+
+	if i != len(expected) {
+		t.Errorf("Number of tokens mismatch: got %d, want %d", i, len(expected))
+	}
+}
+
+// Test cancellation
+func TestReader_StreamTokens_Cancel(t *testing.T) {
+	input := "a\nb\nc\nd\ne"
+	r := NewReader().FromString(input)
+	out := make(chan string, 2) // petit buffer pour tester le cancel
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel() // cancel rapidement
+	}()
+
+	err := r.StreamTokens(ctx, out)
+	if err == nil {
+		t.Errorf("Expected context cancellation error, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
 
