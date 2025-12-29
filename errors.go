@@ -12,6 +12,7 @@ import (
 var (
 	ErrInvalid = errors.New("textio: invalid token")
 	ErrRead    = errors.New("textio: read error")
+	ErrClose   = errors.New("textio: close error")
 )
 
 type ReaderError struct {

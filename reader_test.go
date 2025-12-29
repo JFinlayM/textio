@@ -1,6 +1,7 @@
 package textio
 
 import (
+	"context"
 	"errors"
 	"io"
 	"regexp"
@@ -12,34 +13,13 @@ func stringReader(s string) io.Reader {
 	return strings.NewReader(s)
 }
 
-func toUpperNormalizer(s string, ctx any) string {
-	return strings.ToUpper(strings.TrimSpace(s))
-}
-
-func minLengthFilter(minLen int) FilterFunc {
-	return func(s string, ctx any) bool {
-		return len(s) >= minLen
-	}
-}
-
-func alphaOnlyFilter(s string, ctx any) bool {
+func alphaOnlyFilter(s string) bool {
 	for _, r := range s {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
 			return false
 		}
 	}
 	return len(s) > 0
-}
-
-type testContext struct {
-	counter int
-}
-
-func countingNormalizer(s string, ctx any) string {
-	if tc, ok := ctx.(*testContext); ok {
-		tc.counter++
-	}
-	return strings.TrimSpace(s)
 }
 
 func TestNewReader(t *testing.T) {
@@ -70,14 +50,29 @@ func TestNewReader(t *testing.T) {
 	}
 }
 
+func TestNewReaderWithDelimiter(t *testing.T) {
+	regexp := regexp.MustCompile("\n")
+	r := NewReader()
+	nr := r.WithDelimiter(regexp)
+
+	if nr.delimiter != regexp {
+		t.Error("nr delimiter should have regexp value")
+	}
+
+	if r.delimiter == regexp {
+		t.Error("r delimiter should not have regexp value")
+	}
+
+}
+
 func TestReadAll_Simple(t *testing.T) {
 	input := "hello\nworld\ntest"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"hello", "world", "test"}
@@ -96,9 +91,9 @@ func TestReadAll_EmptyInput(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(stringReader(""))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	if len(tokens) != 0 {
@@ -110,11 +105,11 @@ func TestReadAll_WithNormalization(t *testing.T) {
 	input := "  hello  \n  WORLD  \n  TeSt  "
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetNormalizer(toUpperNormalizer)
+	r.SetNormalizer(ChainNormalizers(NormalizeUpper, NormalizeTrimSpace))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"HELLO", "WORLD", "TEST"}
@@ -133,11 +128,11 @@ func TestReadAll_WithFilter(t *testing.T) {
 	input := "hello\nhi\nworld\na\ntest"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetFilter(minLengthFilter(3))
+	r.SetFilter(FilterMinLength(3))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"hello", "world", "test"}
@@ -156,12 +151,12 @@ func TestReadAll_WithFilterFailOnInvalid(t *testing.T) {
 	input := "hello\nhi\nworld"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetFilter(minLengthFilter(3))
+	r.SetFilter(FilterMinLength(3))
 	r.FailOnInvalid = true
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err == nil {
-		t.Fatal("ReadAll() should have returned an error")
+		t.Fatal("ReadTokens() should have returned an error")
 	}
 
 	if !errors.Is(err, ErrInvalid) {
@@ -174,37 +169,14 @@ func TestReadAll_WithFilterFailOnInvalid(t *testing.T) {
 	}
 }
 
-func TestReadAll_WithUserContext(t *testing.T) {
-	input := "one\ntwo\nthree"
-	ctx := &testContext{}
-
-	r := NewReader()
-	r.SetReaders(stringReader(input))
-	r.SetNormalizer(countingNormalizer)
-	r.UserContext = ctx
-
-	tokens, err := r.ReadAll()
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-
-	if len(tokens) != 3 {
-		t.Errorf("got %d tokens, want 3", len(tokens))
-	}
-
-	if ctx.counter != 3 {
-		t.Errorf("normalizer called %d times, want 3", ctx.counter)
-	}
-}
-
 func TestReadAll_EmptyLineBreak(t *testing.T) {
 	input := "hello\nworld\n\ntest"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	// Should stop at empty line
@@ -229,7 +201,7 @@ func TestStream_Simple(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- r.Stream(ch)
+		errCh <- r.StreamTokens(context.Background(), ch)
 		close(ch)
 	}()
 
@@ -239,7 +211,7 @@ func TestStream_Simple(t *testing.T) {
 	}
 
 	if err := <-errCh; err != nil {
-		t.Fatalf("Stream() error = %v", err)
+		t.Fatalf("StreamTokens() error = %v", err)
 	}
 
 	expected := []string{"hello", "world", "test"}
@@ -264,7 +236,7 @@ func TestStream_WithFilter(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- r.Stream(ch)
+		errCh <- r.StreamTokens(context.Background(), ch)
 		close(ch)
 	}()
 
@@ -274,7 +246,7 @@ func TestStream_WithFilter(t *testing.T) {
 	}
 
 	if err := <-errCh; err != nil {
-		t.Fatalf("Stream() error = %v", err)
+		t.Fatalf("StreamTokens() error = %v", err)
 	}
 
 	expected := []string{"hello", "world", "test"}
@@ -300,7 +272,7 @@ func TestStream_FailOnInvalid(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- r.Stream(ch)
+		errCh <- r.StreamTokens(context.Background(), ch)
 		close(ch)
 	}()
 
@@ -311,7 +283,7 @@ func TestStream_FailOnInvalid(t *testing.T) {
 
 	err := <-errCh
 	if err == nil {
-		t.Fatal("Stream() should have returned an error")
+		t.Fatal("StreamTokens() should have returned an error")
 	}
 
 	if !errors.Is(err, ErrInvalid) {
@@ -367,9 +339,9 @@ func TestSetDelimiterStr_Comma(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiterStr(",")
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"one", "two", "three"}
@@ -390,9 +362,9 @@ func TestSetDelimiterStr_Semicolon(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiterStr(";")
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"apple", "banana", "cherry"}
@@ -413,9 +385,9 @@ func TestSetDelimiter_Regex(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiter(regexp.MustCompile(`\s+`))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"one", "two", "three"}
@@ -436,9 +408,9 @@ func TestSetDelimiterFromString(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiterFromString(`\d+`)
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"foo", "bar", "baz"}
@@ -459,9 +431,9 @@ func TestSetDelimiterStr_Empty(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiterStr("")
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	// Should default to newline
@@ -478,9 +450,9 @@ func TestSetReaders_Multiple(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(r1, r2)
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"hello", "world", "foo", "bar"}
@@ -503,9 +475,9 @@ func TestAddReaders(t *testing.T) {
 	r.SetReaders(r1)
 	r.AddReaders(r2)
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"first", "second", "third", "fourth"}
@@ -550,10 +522,10 @@ func TestReadAll_FailOnError(t *testing.T) {
 	r.SetReaders(errorReader{})
 	r.FailOnError = true
 
-	_, err := r.ReadAll()
+	_, err := r.ReadTokens()
 
 	if err == nil {
-		t.Fatal("ReadAll() should have returned an error")
+		t.Fatal("ReadTokens() should have returned an error")
 	}
 
 	if !errors.Is(err, ErrRead) {
@@ -574,7 +546,7 @@ func TestDefaultNormalizer(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := DefaultNormalizer(tt.input, nil)
+		got := NormalizeTrimSpace(tt.input)
 		if got != tt.want {
 			t.Errorf("DefaultNormalizer(%q) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -584,14 +556,14 @@ func TestDefaultNormalizer(t *testing.T) {
 func TestIntegration_CompleteWorkflow(t *testing.T) {
 	input := "  HELLO  \n  world  \n  123  \n  TeSt  \n  a  "
 
-	r := NewReader()
-	r.SetReaders(stringReader(input))
-	r.SetNormalizer(toUpperNormalizer)
-	r.SetFilter(minLengthFilter(3))
+	r := NewReader().
+		WithReaders(stringReader(input)).
+		WithNormalizer(ChainNormalizers(NormalizeTrimSpace, NormalizeUpper)).
+		WithFilter(FilterMinLength(3))
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"HELLO", "WORLD", "123", "TEST"}
@@ -613,9 +585,9 @@ func TestIntegration_CSVParsing(t *testing.T) {
 	r.SetReaders(stringReader(input))
 	r.SetDelimiterFromString(",|\n")
 
-	tokens, err := r.ReadAll()
+	tokens, err := r.ReadTokens()
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
 	expected := []string{"name", "age", "city", "Alice", "30", "NYC", "Bob", "25", "LA"}
@@ -631,7 +603,7 @@ func BenchmarkReadAll_Small(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		r := NewReader()
 		r.SetReaders(stringReader(input))
-		_, _ = r.ReadAll()
+		_, _ = r.ReadTokens()
 	}
 }
 
@@ -647,7 +619,7 @@ func BenchmarkReadAll_Large(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		r := NewReader()
 		r.SetReaders(stringReader(input))
-		_, _ = r.ReadAll()
+		_, _ = r.ReadTokens()
 	}
 }
 
@@ -666,7 +638,7 @@ func BenchmarkStream_Large(b *testing.B) {
 		ch := make(chan string, 100)
 
 		go func() {
-			_ = r.Stream(ch)
+			_ = r.StreamTokens(context.Background(), ch)
 			close(ch)
 		}()
 
