@@ -11,20 +11,13 @@
 //
 // The core abstraction is the Reader type, which wraps one or more [io.Reader]
 // instances and exposes a controlled and configurable reading behavior.
-//
-// Error handling is configurable: the caller may choose to fail immediately
-// on errors or invalid input, or to continue processing depending on the
-// Reader configuration.
-//
-// This package is intentionally low-level and does not impose any specific
-// text model or output structure, leaving higher-level semantics to the user.
 package textio
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -36,42 +29,20 @@ type NormalizeFunc func(s string, ctx any) string
 // Should return true is the token satisfies user defined constraints, false otherwise.
 type FilterFunc func(s string, ctx any) bool
 
-// ErrorFormatter can be implemented to customize how errors are created
-// and returned by the textio package.
-//
-// When provided to a Reader, ErrorFormatter is used instead of the standard
-// error constructors to build errors originating from
-// scanning, normalization, or filtering failures.
-//
-// This allows users to:
-//   - wrap errors with additional context
-//   - attach custom error types
-//   - integrate with application-specific error handling logic
-//
-// If no ErrorFormatter is set, [textio] falls back to returning the original
-// error or the standard formatted error [fmt.Errorf].
-type ErrorFormatter interface {
-	// Errorf formats an error according to a format specifier.
-	Errorf(format string, args ...any) error
-
-	// Error transforms or wraps an existing error.
-	Error(err error) error
-}
-
 // [Reader] reads tokens from an io.Reader and optionally applies
 // normalization and filtering before returning them.
 //
-// [Reader] supports both batch and streaming consumption patterns
-// and can be configured to control error handling behavior.
+// [Reader] supports both batch and streaming consumption patterns.
+// The tokens read with [Reader] are either seperate with a string delimiter [delimiterStr] or a regular expression [delimiter]
 type Reader struct {
-	reader         io.Reader
-	delimiter      string
-	normalize      NormalizeFunc
-	filter         FilterFunc
-	UserContext    any
-	FailOnError    bool
-	FailOnInvalid  bool
-	errorFormatter ErrorFormatter
+	reader        io.Reader
+	delimiter     *regexp.Regexp
+	delimiterStr  string
+	normalize     NormalizeFunc
+	filter        FilterFunc
+	UserContext   any
+	FailOnError   bool
+	FailOnInvalid bool
 }
 
 // Default normalization function. It is a wrapper for the [strings.TrimSpace] function from the strings module.
@@ -89,10 +60,10 @@ func DefaultNormalizer(s string, ctx any) string {
 // provided setter methods before reading.
 func NewReader() *Reader {
 	return &Reader{
-		reader:      os.Stdin,
-		delimiter:   "\n",
-		normalize:   DefaultNormalizer,
-		FailOnError: true,
+		reader:       os.Stdin,
+		delimiterStr: "\n",
+		normalize:    DefaultNormalizer,
+		FailOnError:  true,
 	}
 }
 
@@ -118,12 +89,30 @@ func (r *Reader) AddReaders(readers ...io.Reader) {
 	r.reader = io.MultiReader(readers...)
 }
 
-// Sets the delimiter used to seperate input into tokens.
-func (r *Reader) SetDelimiter(s string) {
+// Sets the [delimiterStr] field of r used to seperate input into tokens.
+// This resets the [delimiter] field of r.
+func (r *Reader) SetDelimiterStr(s string) {
 	if s == "" {
 		s = "\n"
 	}
-	r.delimiter = s
+	r.delimiterStr = s
+	r.delimiter = nil
+}
+
+// Sets the delimiter used to seperate input into tokens.
+// This resets the [delimiterStr] field of r.
+func (r *Reader) SetDelimiter(regexpr *regexp.Regexp) {
+	r.delimiter = regexpr
+	r.delimiterStr = ""
+}
+
+// Sets the delimiter used to seperate input into tokens.
+// This resets the [delimiterStr] field of r.
+// This function will panic if the expression cannot compile.
+func (r *Reader) SetDelimiterFromString(expr string) {
+	regexpr := regexp.MustCompile(expr)
+	r.delimiter = regexpr
+	r.delimiterStr = ""
 }
 
 // Sets the function to be called to normalize current read token before passing through filter function. There is none by default.
@@ -136,18 +125,13 @@ func (r *Reader) SetFilter(filterFunc FilterFunc) {
 	r.filter = filterFunc
 }
 
-// Sets the error formatter in the r [Reader] structure.
-func (r *Reader) SetErrorFormatter(errorFormatter ErrorFormatter) {
-	r.errorFormatter = errorFormatter
-}
-
 // Read processes input from the provided [io.Reader](s).
 // It reads strings, applies normalization and filtering if specified,
 // and returns the resulting strings or an error if any issues occur.
 //
 // Returns:
 //   - A slice of strings containing the processed input.
-//   - An error if any issues occur during reading or processing, depending on the configuration.
+//   - error: [ErrInvalid] if the token doesnt respect constraints defined by filter function and if [FailOnInvalid] is set. [ErrRead] if an error occured during scanning.
 //
 // Behavior:
 //   - If a delimiter is specified in the [Reader], it uses a custom split function
@@ -157,38 +141,38 @@ func (r *Reader) SetErrorFormatter(errorFormatter ErrorFormatter) {
 //     If a string fails the filter and FailOnInvalid is true, the function returns an error. Otherwise, it skips the invalid string.
 //   - If an error occurs during scanning and FailOnError is true, the function returns the error.
 func (r *Reader) ReadAll() ([]string, error) {
-	var parts []string
+	var tokens []string
 
 	scanner := bufio.NewScanner(r.reader)
+	scanner.Split(r.createSplitFunc())
 
-	if r.delimiter != "" {
-		scanner.Split(r.createSplitFunc())
-	}
-
+	n := 0
 	for scanner.Scan() {
-		part := scanner.Text()
-		if part == "" {
+		token := scanner.Text()
+		if token == "" {
 			break
 		}
 		if r.normalize != nil {
-			part = r.normalize(part, r.UserContext)
+			token = r.normalize(token, r.UserContext)
 		}
 
-		if r.filter != nil && !r.filter(part, r.UserContext) {
+		if r.filter != nil && !r.filter(token, r.UserContext) {
 			if r.FailOnInvalid {
-				return parts, r.errorf("String '%s' didn't respect constraints\n", part)
+				return tokens, newErrInvalid(token, n)
 			}
+			n += len(token)
 			continue
 		}
 
-		parts = append(parts, part)
+		n += len(token)
+		tokens = append(tokens, token)
 	}
 
 	if err := scanner.Err(); err != nil && r.FailOnError {
-		return parts, r.error(err)
+		return tokens, newErrRead(err)
 	}
 
-	return parts, nil
+	return tokens, nil
 }
 
 // Read processes input from the provided [io.Reader](s).
@@ -197,9 +181,13 @@ func (r *Reader) ReadAll() ([]string, error) {
 //
 // Returns:
 //   - n: number of bytes read
-//   - err: an error if any issues occur during reading
+//   - err: [ErrRead] if any issues occur during reading
 func (r *Reader) Read(p []byte) (n int, err error) {
-	return r.reader.Read(p)
+	n, err = r.reader.Read(p)
+	if err != nil {
+		err = newErrRead(err)
+	}
+	return n, err
 }
 
 // Read processes input from the provided [io.Reader](s).
@@ -210,7 +198,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 //   - s: the string channel
 //
 // Returns:
-//   - An error if any issues occur during reading or processing, depending on the configuration.
+//   - error: [ErrInvalid] if the token doesnt respect constraints defined by filter function and if [FailOnInvalid] is set. [ErrRead] if an error occured during scanning.
 //
 // Behavior:
 //   - If a delimiter is specified in the [Reader], it uses a custom split function
@@ -221,65 +209,60 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 //   - If an error occurs during scanning and FailOnError is true, the function returns the error.
 func (r *Reader) Stream(s chan string) error {
 	scanner := bufio.NewScanner(r.reader)
+	scanner.Split(r.createSplitFunc())
 
-	if r.delimiter != "" {
-		scanner.Split(r.createSplitFunc())
-	}
-
+	n := 0
 	for scanner.Scan() {
-		part := scanner.Text()
-		if part == "" {
+		token := scanner.Text()
+		if token == "" {
 			break
 		}
 
 		if r.normalize != nil {
-			part = r.normalize(part, r.UserContext)
+			token = r.normalize(token, r.UserContext)
 		}
 
-		if r.filter != nil && !r.filter(part, r.UserContext) {
+		if r.filter != nil && !r.filter(token, r.UserContext) {
 			if r.FailOnInvalid {
-				return r.errorf("String '%s' didn't respect constraints\n", part)
+				return newErrInvalid(token, n)
 			}
+			n += len(token)
 			continue
 		}
-
-		s <- part
+		n += len(token)
+		s <- token
 	}
 
 	if err := scanner.Err(); err != nil && r.FailOnError {
-		return r.error(err)
+		return newErrRead(err)
 	}
 
 	return nil
 }
 
 func (r *Reader) createSplitFunc() bufio.SplitFunc {
+	if r.delimiter == nil && r.delimiterStr == "" {
+		return bufio.ScanLines
+	}
 	return func(data []byte, atEOF bool) (int, []byte, error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil
 		}
-		if prefix, _, found := strings.Cut(string(data), r.delimiter); found {
-			return len(prefix) + len(r.delimiter), []byte(prefix), nil
+		if r.delimiter != nil {
+			if loc := r.delimiter.FindIndex(data); loc != nil {
+				return loc[1], data[:loc[0]], nil
+			}
+		} else if r.delimiterStr != "" {
+			if prefix, _, found := strings.Cut(string(data), r.delimiterStr); found {
+				return len(prefix) + len(r.delimiterStr), []byte(prefix), nil
+			}
+		} else {
+			panic("delimiterStr and delimiter fields are both empty. This should not happen !")
 		}
+
 		if atEOF {
 			return len(data), data, nil
 		}
 		return 0, nil, nil
-	}
-}
-
-func (r *Reader) errorf(format string, a ...any) error {
-	if r.errorFormatter != nil {
-		return r.errorFormatter.Errorf(format, a...)
-	} else {
-		return fmt.Errorf(format, a...)
-	}
-}
-
-func (r *Reader) error(err error) error {
-	if r.errorFormatter != nil {
-		return r.errorFormatter.Error(err)
-	} else {
-		return err
 	}
 }
