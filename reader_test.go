@@ -34,7 +34,7 @@ func TestNewReader(t *testing.T) {
 		t.Error("reader should not be nil")
 	}
 
-	if r.delimiterStr == "" {
+	if r.delimiter == nil {
 		t.Error("delimiter should have default value")
 	}
 
@@ -53,14 +53,16 @@ func TestNewReader(t *testing.T) {
 
 func TestNewReaderWithDelimiter(t *testing.T) {
 	regexp := regexp.MustCompile("\n")
+	d := DefaultDelimiter()
+	d.SetRegexp(regexp)
 	r := NewReader()
-	nr := r.WithDelimiter(regexp)
+	nr := r.WithDelimiter(d)
 
-	if nr.delimiter != regexp {
+	if nr.delimiter.regexpr != regexp {
 		t.Error("nr delimiter should have regexp value")
 	}
 
-	if r.delimiter == regexp {
+	if r.delimiter.regexpr == regexp {
 		t.Error("r delimiter should not have regexp value")
 	}
 
@@ -171,9 +173,12 @@ func TestReadAll_WithFilterFailOnInvalid(t *testing.T) {
 }
 
 func TestReadAll_EmptyLineBreak(t *testing.T) {
-	input := "hello\nworld\n\ntest"
+	input := "hello\nworld\ntest\n--end--"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
+	endDel := DefaultDelimiter()
+	endDel.SetDelimiterStr("--end--")
+	r.SetEndDelimiter(endDel)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -181,7 +186,7 @@ func TestReadAll_EmptyLineBreak(t *testing.T) {
 	}
 
 	// Should stop at empty line
-	expected := []string{"hello", "world"}
+	expected := []string{"hello", "world", "test"}
 	if len(tokens) != len(expected) {
 		t.Fatalf("got %d tokens, want %d", len(tokens), len(expected))
 	}
@@ -338,7 +343,9 @@ func TestSetDelimiterStr_Comma(t *testing.T) {
 	input := "one,two,three"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiterStr(",")
+	d := DefaultDelimiter()
+	d.SetDelimiterStr(",")
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -361,7 +368,9 @@ func TestSetDelimiterStr_Semicolon(t *testing.T) {
 	input := "apple;banana;cherry"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiterStr(";")
+	d := DefaultDelimiter()
+	d.SetDelimiterStr(";")
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -384,7 +393,9 @@ func TestSetDelimiter_Regex(t *testing.T) {
 	input := "one  two   three"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiter(regexp.MustCompile(`\s+`))
+	d := DefaultDelimiter()
+	d.SetRegexp(regexp.MustCompile(`\s+`))
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -407,7 +418,9 @@ func TestSetDelimiterFromString(t *testing.T) {
 	input := "foo123bar456baz"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiterFromString(`\d+`)
+	d := DefaultDelimiter()
+	d.SetRegexp(regexp.MustCompile(`\d+`))
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -430,7 +443,9 @@ func TestSetDelimiterStr_Empty(t *testing.T) {
 	input := "one\ntwo\nthree"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiterStr("")
+	d := DefaultDelimiter()
+	d.SetDelimiterStr("")
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
@@ -640,7 +655,9 @@ func TestIntegration_CSVParsing(t *testing.T) {
 
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	r.SetDelimiterFromString(",|\n")
+	d := DefaultDelimiter()
+	d.SetRegExpFromString(",|\n")
+	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 )
 
@@ -74,20 +73,9 @@ func (rc *ReaderCloser) FromFile(path string) (*ReaderCloser, error) {
 // configured with the given delimiter regular expression.
 //
 // The original [ReaderCloser] is not modified.
-func (rc *ReaderCloser) WithDelimiter(regexp *regexp.Regexp) *ReaderCloser {
+func (rc *ReaderCloser) WithDelimiter(d *Delimiter) *ReaderCloser {
 	newR := *rc
-	newR.SetDelimiter(regexp)
-	return &newR
-}
-
-// WithDelimiterStr returns a shallow copy of the [ReaderCloser]
-// configured with a delimiter specified as a string.
-//
-// The string is NOT a regular expression.
-// The original [ReaderCloser] is not modified.
-func (rc *ReaderCloser) WithDelimiterStr(str string) *ReaderCloser {
-	newR := *rc
-	newR.SetDelimiterStr(str)
+	newR.SetDelimiter(d)
 	return &newR
 }
 

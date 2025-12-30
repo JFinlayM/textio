@@ -11,6 +11,10 @@ func TestClose(t *testing.T) {
 	}
 	defer rc.Close()
 
+	endDelim := DefaultDelimiter()
+	endDelim.SetDelimiterStr("--stop--")
+	rc.SetEndDelimiter(endDelim)
+
 	tokens, err := rc.ReadTokens()
 	if err != nil {
 		t.Fatalf("ReadTokens() error = %v", err)

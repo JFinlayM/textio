@@ -19,17 +19,8 @@ import (
 	"context"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 )
-
-// s is the string currently being read parameter is set as the [UserContext] attribute
-// Used to transform token before passing through the [FilterFunc].
-type NormalizeFunc func(s string) string
-
-// s is the string currently being read parameter is set as the [UserContext] attribute.
-// Should return true is the token satisfies user defined constraints, false otherwise.
-type FilterFunc func(s string) bool
 
 // [Reader] reads tokens from an io.Reader and optionally applies
 // normalization and filtering before returning them.
@@ -39,105 +30,15 @@ type FilterFunc func(s string) bool
 type Reader struct {
 	// The reader(s) from where we read tokens
 	reader io.Reader
-	// Delimiter between tokens as a regular expression
-	delimiter *regexp.Regexp
-	// String delimiter (no an expression !) to seperate tokens.
-	// By contruction, [delimiter] and [delimiterStr] cannot be set at the same time.
-	delimiterStr  string
+	// delimiter is for the seperation of the tokens.
+	delimiter *Delimiter
+	// endDelimiter is used to stop scanning. Keep in mind that in order to stop scanning the input NEEDS the [delimiter] followed by [endDelimiter].
+	// For example: input = "hello\nworld\nend", returns ["hello", "world"] if delimiter = "\n" and endDelimiter = "end".
+	endDelimiter  *Delimiter
 	normalize     NormalizeFunc
 	filter        FilterFunc
 	FailOnError   bool
 	FailOnInvalid bool
-}
-
-// Default normalization function. It is a wrapper for the [strings.TrimSpace] function.
-func NormalizeTrimSpace(s string) string {
-	return strings.TrimSpace(s)
-}
-
-// This function is a wrapper for the [strings.ToUpper] function.
-func NormalizeUpper(s string) string {
-	return strings.ToUpper(s)
-}
-
-// This function is a wrapper for the [strings.ToLower] function.
-func NormalizeLower(s string) string {
-	return strings.ToLower(s)
-}
-
-// Creates a [NormalizeFunc] function that applies the transformations given by the ns [NormalizeFunc] functions.
-// The transformations are applied in the same order as ns.
-func ChainNormalizers(ns ...NormalizeFunc) NormalizeFunc {
-	return func(s string) string {
-		for _, n := range ns {
-			s = n(s)
-		}
-		return s
-	}
-}
-
-// FilterNonEmpty returns a FilterFunc that rejects empty or whitespace-only strings.
-//
-// The input string is trimmed using strings.TrimSpace before evaluation.
-// If the resulting string is empty, the token is rejected.
-func FilterNonEmpty(s string) bool {
-	return strings.TrimSpace(s) != ""
-}
-
-// FilterMinLength returns a FilterFunc that accepts only strings
-// whose length is greater than or equal to n.
-func FilterMinLength(n int) FilterFunc {
-	return func(s string) bool {
-		return len(s) >= n
-	}
-}
-
-// FilterMaxLength returns a FilterFunc that accepts only strings
-// whose length is less than or equal to n.
-func FilterMaxLength(n int) FilterFunc {
-	return func(s string) bool {
-		return len(s) <= n
-	}
-}
-
-// FilterRegexp returns a FilterFunc that accepts strings
-// matching the provided regular expression.
-//
-// The caller is responsible for compiling the regexp.
-func FilterRegexp(re *regexp.Regexp) FilterFunc {
-	return func(s string) bool {
-		return re.MatchString(s)
-	}
-}
-
-// And combines two FilterFunc using a logical AND.
-//
-// The resulting filter accepts a string only if both filters
-// accept it.
-func (f1 FilterFunc) And(f2 FilterFunc) FilterFunc {
-	return func(s string) bool {
-		return f1(s) && f2(s)
-	}
-}
-
-// Or combines two FilterFunc using a logical OR.
-//
-// The resulting filter accepts a string if at least one
-// of the filters accepts it.
-func (f1 FilterFunc) Or(f2 FilterFunc) FilterFunc {
-	return func(s string) bool {
-		return f1(s) || f2(s)
-	}
-}
-
-// Not returns a FilterFunc that negates the result of the given filter.
-//
-// The resulting filter accepts a string if and only if
-// the original filter rejects it.
-func Not(f FilterFunc) FilterFunc {
-	return func(s string) bool {
-		return !f(s)
-	}
 }
 
 // NewReader creates a new Reader with default configuration.
@@ -150,10 +51,10 @@ func Not(f FilterFunc) FilterFunc {
 // provided setter methods before reading.
 func NewReader() *Reader {
 	return &Reader{
-		reader:       os.Stdin,
-		delimiterStr: "\n",
-		normalize:    NormalizeTrimSpace,
-		FailOnError:  true,
+		reader:      os.Stdin,
+		delimiter:   DefaultDelimiter(),
+		normalize:   NormalizeTrimSpace,
+		FailOnError: true,
 	}
 }
 
@@ -183,20 +84,9 @@ func (r *Reader) FromBytes(b []byte) *Reader {
 // configured with the given delimiter regular expression.
 //
 // The original [Reader] is not modified.
-func (r *Reader) WithDelimiter(regexp *regexp.Regexp) *Reader {
+func (r *Reader) WithDelimiter(d *Delimiter) *Reader {
 	newR := *r
-	newR.SetDelimiter(regexp)
-	return &newR
-}
-
-// WithDelimiterStr returns a shallow copy of the [Reader]
-// configured with a delimiter specified as a string.
-//
-// The string is NOT a regular expression.
-// The original [Reader] is not modified.
-func (r *Reader) WithDelimiterStr(str string) *Reader {
-	newR := *r
-	newR.SetDelimiterStr(str)
+	newR.SetDelimiter(d)
 	return &newR
 }
 
@@ -254,30 +144,16 @@ func (r *Reader) AddReaders(readers ...io.Reader) {
 	r.SetReaders(readers...)
 }
 
-// Sets the [delimiterStr] field of r used to seperate input into tokens.
-// This resets the [delimiter] field of r.
-func (r *Reader) SetDelimiterStr(s string) {
-	if s == "" {
-		s = "\n"
-	}
-	r.delimiterStr = s
-	r.delimiter = nil
+// Sets the delimiter used to seperate input into tokens.
+// This resets the [delimiterStr] field of r.
+func (r *Reader) SetDelimiter(d *Delimiter) {
+	r.delimiter = d
 }
 
 // Sets the delimiter used to seperate input into tokens.
 // This resets the [delimiterStr] field of r.
-func (r *Reader) SetDelimiter(regexpr *regexp.Regexp) {
-	r.delimiter = regexpr
-	r.delimiterStr = ""
-}
-
-// Sets the delimiter used to seperate input into tokens.
-// This resets the [delimiterStr] field of r.
-// This function will panic if the expression cannot compile.
-func (r *Reader) SetDelimiterFromString(expr string) {
-	regexpr := regexp.MustCompile(expr)
-	r.delimiter = regexpr
-	r.delimiterStr = ""
+func (r *Reader) SetEndDelimiter(d *Delimiter) {
+	r.endDelimiter = d
 }
 
 // Sets the function to be called to normalize current read token before passing through filter function. There is none by default.
@@ -293,6 +169,8 @@ func (r *Reader) SetFilter(filterFunc FilterFunc) {
 // Read processes input from the provided [io.Reader](s).
 // It reads strings, applies normalization and filtering if specified,
 // and returns the resulting strings or an error if any issues occur.
+// If a end delimiter is set, then the scanning stop if there is a token matching seperation delimiter followed by end delimiter.
+// For example: input = "hello\nworld\nend", returns ["hello", "world"] if delimiter = "\n" and endDelimiter = "end".
 //
 // Returns:
 //   - A slice of strings containing the processed input.
@@ -309,14 +187,15 @@ func (r *Reader) ReadTokens() ([]string, error) {
 	var tokens []string
 
 	scanner := bufio.NewScanner(r.reader)
-	scanner.Split(r.createSplitFunc())
+	scanner.Split(r.delimiter.SplitFunc())
 
 	n := 0
 	for scanner.Scan() {
 		token := scanner.Text()
-		if token == "" {
+		if r.endDelimiter != nil && r.endDelimiter.MatchString(token) {
 			break
 		}
+
 		if r.normalize != nil {
 			token = r.normalize(token)
 		}
@@ -359,6 +238,8 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 //
 // Tokens are extracted according to the Reader's configured delimiter (string or regex),
 // normalized using the optional normalization function, and filtered using the optional filter function.
+// If a end delimiter is set, then the scanning stop if there is a token matching seperation delimiter followed by end delimiter.
+// For example: input = "hello\nworld\nend", returns ["hello", "world"] if delimiter = "\n" and endDelimiter = "end".
 //
 // The function respects context cancellation via the provided `ctx`. If `ctx` is canceled,
 // StreamTokens returns immediately with `ctx.Err()`.
@@ -380,13 +261,14 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 //   - The function terminates when all input is consumed, an error occurs, or the context is canceled.
 func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 	scanner := bufio.NewScanner(r.reader)
-	scanner.Split(r.createSplitFunc())
+	scanner.Split(r.delimiter.SplitFunc())
 
 	n := 0
 	for scanner.Scan() {
 		token := scanner.Text()
-		if token == "" {
-			break
+
+		if r.endDelimiter != nil && r.endDelimiter.MatchString(token) {
+			return nil
 		}
 
 		if r.normalize != nil {
@@ -413,31 +295,4 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 		return newErrRead(err)
 	}
 	return nil
-}
-
-func (r *Reader) createSplitFunc() bufio.SplitFunc {
-	if r.delimiter == nil && r.delimiterStr == "" {
-		return bufio.ScanLines
-	}
-	return func(data []byte, atEOF bool) (int, []byte, error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
-		}
-		if r.delimiter != nil {
-			if loc := r.delimiter.FindIndex(data); loc != nil {
-				return loc[1], data[:loc[0]], nil
-			}
-		} else if r.delimiterStr != "" {
-			if prefix, _, found := strings.Cut(string(data), r.delimiterStr); found {
-				return len(prefix) + len(r.delimiterStr), []byte(prefix), nil
-			}
-		} else {
-			panic("delimiterStr and delimiter fields are both empty. This should not happen !")
-		}
-
-		if atEOF {
-			return len(data), data, nil
-		}
-		return 0, nil, nil
-	}
 }
