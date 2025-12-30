@@ -21,6 +21,24 @@ func DefaultDelimiter() *Delimiter {
 	}
 }
 
+func (d *Delimiter) WithRegexp(regexpr *regexp.Regexp) *Delimiter {
+	newD := *d
+	newD.SetRegexp(regexpr)
+	return &newD
+}
+
+func (d *Delimiter) WithStr(s string) *Delimiter {
+	newD := *d
+	newD.SetStr(s)
+	return &newD
+}
+
+func (d *Delimiter) WithRegexpFromString(s string) *Delimiter {
+	newD := *d
+	newD.SetRegexpFromString(s)
+	return &newD
+}
+
 // Sets the regexpr delimiter.
 // This resets the [str] field of `d`.
 func (d *Delimiter) SetRegexp(regexpr *regexp.Regexp) {
@@ -35,7 +53,7 @@ func (d *Delimiter) SetRegexp(regexpr *regexp.Regexp) {
 
 // Sets the [str] field of `d` used to seperate input into tokens.
 // This resets the [delimiter] field of `d`.
-func (d *Delimiter) SetDelimiterStr(s string) {
+func (d *Delimiter) SetStr(s string) {
 	if s == "" {
 		s = "\n"
 	}
@@ -46,7 +64,7 @@ func (d *Delimiter) SetDelimiterStr(s string) {
 // Sets the regexpr delimiter from an expression in string format.
 // This resets the [str] field of `d`.
 // This function will panic if the expression cannot compile.
-func (d *Delimiter) SetRegExpFromString(expr string) {
+func (d *Delimiter) SetRegexpFromString(expr string) {
 	regexpr := regexp.MustCompile(expr)
 	d.regexpr = regexpr
 	d.str = ""

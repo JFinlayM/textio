@@ -90,6 +90,16 @@ func (r *Reader) WithDelimiter(d *Delimiter) *Reader {
 	return &newR
 }
 
+// WithEndDelimiter returns a shallow copy of the [Reader]
+// configured with the given delimiter regular expression.
+//
+// The original [Reader] is not modified.
+func (r *Reader) WithEndDelimiter(d *Delimiter) *Reader {
+	newR := *r
+	newR.SetEndDelimiter(d)
+	return &newR
+}
+
 // WithNormalizer returns a shallow copy of the [Reader]
 // configured with the provided normalization function.
 //

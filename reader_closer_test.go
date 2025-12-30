@@ -11,8 +11,7 @@ func TestClose(t *testing.T) {
 	}
 	defer rc.Close()
 
-	endDelim := DefaultDelimiter()
-	endDelim.SetDelimiterStr("--stop--")
+	endDelim := DefaultDelimiter().WithStr("--stop--")
 	rc.SetEndDelimiter(endDelim)
 
 	tokens, err := rc.ReadTokens()

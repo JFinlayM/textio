@@ -177,7 +177,7 @@ func TestReadAll_EmptyLineBreak(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 	endDel := DefaultDelimiter()
-	endDel.SetDelimiterStr("--end--")
+	endDel.SetStr("--end--")
 	r.SetEndDelimiter(endDel)
 
 	tokens, err := r.ReadTokens()
@@ -344,7 +344,7 @@ func TestSetDelimiterStr_Comma(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 	d := DefaultDelimiter()
-	d.SetDelimiterStr(",")
+	d.SetStr(",")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -369,7 +369,7 @@ func TestSetDelimiterStr_Semicolon(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 	d := DefaultDelimiter()
-	d.SetDelimiterStr(";")
+	d.SetStr(";")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -444,7 +444,7 @@ func TestSetDelimiterStr_Empty(t *testing.T) {
 	r := NewReader()
 	r.SetReaders(stringReader(input))
 	d := DefaultDelimiter()
-	d.SetDelimiterStr("")
+	d.SetStr("")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -655,8 +655,7 @@ func TestIntegration_CSVParsing(t *testing.T) {
 
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetRegExpFromString(",|\n")
+	d := DefaultDelimiter().WithRegexpFromString(",|\n")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
