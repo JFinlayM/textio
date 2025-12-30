@@ -157,8 +157,6 @@ func NewReader() *Reader {
 	}
 }
 
-// func (r *Reader) FromFile(path string) (*Reader, error)
-
 // [FromString] returns a shallow copy of the [Reader]
 // with a new reader from string s.
 //
@@ -386,12 +384,6 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 
 	n := 0
 	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		token := scanner.Text()
 		if token == "" {
 			break
@@ -410,7 +402,6 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 		}
 
 		n += len(token)
-
 		select {
 		case out <- token:
 		case <-ctx.Done():

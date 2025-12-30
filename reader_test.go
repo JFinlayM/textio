@@ -591,7 +591,7 @@ func TestReader_StreamTokens(t *testing.T) {
 func TestReader_StreamTokens_Cancel(t *testing.T) {
 	input := "a\nb\nc\nd\ne"
 	r := NewReader().FromString(input)
-	out := make(chan string, 2) // petit buffer pour tester le cancel
+	out := make(chan string) // petit buffer pour tester le cancel
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

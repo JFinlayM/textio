@@ -10,9 +10,11 @@ import (
 // type ReaderErrorKind int
 
 var (
-	ErrInvalid = errors.New("textio: invalid token")
-	ErrRead    = errors.New("textio: read error")
-	ErrClose   = errors.New("textio: close error")
+	ErrInvalid             = errors.New("textio: invalid token")
+	ErrRead                = errors.New("textio: read error")
+	ErrClose               = errors.New("textio: close error")
+	ErrOutputBufferBlocked = errors.New("textio: output buffer is blocked")
+	ErrOpen                = errors.New("textio: open error")
 )
 
 type ReaderError struct {
@@ -24,6 +26,11 @@ type ReaderError struct {
 	FileName  string
 	FuncName  string
 	ErrorLine int
+}
+
+type ReaderCloserError struct {
+	*ReaderError
+	Filepath string
 }
 
 func (e *ReaderError) Error() string {
@@ -67,6 +74,13 @@ func newReaderError(skip int) *ReaderError {
 	}
 }
 
+func newReaderCloserError(skip int) *ReaderCloserError {
+	re := newReaderError(skip + 1)
+	return &ReaderCloserError{
+		ReaderError: re,
+	}
+}
+
 func newErrInvalid(token string, index int) error {
 	re := newReaderError(3)
 	re.Kind = ErrInvalid
@@ -78,6 +92,28 @@ func newErrInvalid(token string, index int) error {
 func newErrRead(err error) error {
 	re := newReaderError(3)
 	re.Kind = ErrRead
+	re.Err = err
+	return re
+}
+
+func newErrOutputBufferBlocked(token string, index int) error {
+	re := newReaderError(3)
+	re.Kind = ErrOutputBufferBlocked
+	re.Token = token
+	re.Index = index
+	return re
+}
+
+func newErrOpen(err error) error {
+	re := newReaderCloserError(3)
+	re.Kind = ErrOpen
+	re.Err = err
+	return re
+}
+
+func newErrClose(err error) error {
+	re := newReaderCloserError(3)
+	re.Kind = ErrClose
 	re.Err = err
 	return re
 }
