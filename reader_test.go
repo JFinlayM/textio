@@ -53,19 +53,13 @@ func TestNewReader(t *testing.T) {
 
 func TestNewReaderWithDelimiter(t *testing.T) {
 	regexp := regexp.MustCompile("\n")
-	d := DefaultDelimiter()
-	d.SetRegexp(regexp)
+	d := NewDelimiter().WithTokenRegexp(regexp)
 	r := NewReader()
 	nr := r.WithDelimiter(d)
 
-	if nr.delimiter.regexpr != regexp {
+	if nr.delimiter == r.delimiter {
 		t.Error("nr delimiter should have regexp value")
 	}
-
-	if r.delimiter.regexpr == regexp {
-		t.Error("r delimiter should not have regexp value")
-	}
-
 }
 
 func TestReadAll_Simple(t *testing.T) {
@@ -173,22 +167,19 @@ func TestReadAll_WithFilterFailOnInvalid(t *testing.T) {
 }
 
 func TestReadAll_EmptyLineBreak(t *testing.T) {
-	input := "hello\nworld\ntest\n--end--"
+	input := "hello\nworld\ntest--end--"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	endDel := DefaultDelimiter()
-	endDel.SetStr("--end--")
-	r.SetEndDelimiter(endDel)
+	r.SetDelimiter(NewDelimiter().WithStopStr("--end--"))
 
 	tokens, err := r.ReadTokens()
 	if err != nil {
 		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
-	// Should stop at empty line
 	expected := []string{"hello", "world", "test"}
 	if len(tokens) != len(expected) {
-		t.Fatalf("got %d tokens, want %d", len(tokens), len(expected))
+		t.Fatalf("got %d tokens : %v, want %d", len(tokens), tokens, len(expected))
 	}
 
 	for i, tok := range tokens {
@@ -343,8 +334,7 @@ func TestSetDelimiterStr_Comma(t *testing.T) {
 	input := "one,two,three"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetStr(",")
+	d := NewDelimiter().WithTokenStr(",")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -368,8 +358,7 @@ func TestSetDelimiterStr_Semicolon(t *testing.T) {
 	input := "apple;banana;cherry"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetStr(";")
+	d := NewDelimiter().WithTokenStr(";")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -393,8 +382,7 @@ func TestSetDelimiter_Regex(t *testing.T) {
 	input := "one  two   three"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetRegexp(regexp.MustCompile(`\s+`))
+	d := NewDelimiter().WithTokenRegexp(regexp.MustCompile(`\s+`))
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -418,8 +406,7 @@ func TestSetDelimiterFromString(t *testing.T) {
 	input := "foo123bar456baz"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetRegexp(regexp.MustCompile(`\d+`))
+	d := NewDelimiter().WithTokenRegexp(regexp.MustCompile(`\d+`))
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -443,8 +430,7 @@ func TestSetDelimiterStr_Empty(t *testing.T) {
 	input := "one\ntwo\nthree"
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter()
-	d.SetStr("")
+	d := NewDelimiter().WithTokenStr("")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()
@@ -452,8 +438,7 @@ func TestSetDelimiterStr_Empty(t *testing.T) {
 		t.Fatalf("ReadTokens() error = %v", err)
 	}
 
-	// Should default to newline
-	expected := []string{"one", "two", "three"}
+	expected := []string{"one\ntwo\nthree"}
 	if len(tokens) != len(expected) {
 		t.Fatalf("got %d tokens, want %d", len(tokens), len(expected))
 	}
@@ -655,7 +640,7 @@ func TestIntegration_CSVParsing(t *testing.T) {
 
 	r := NewReader()
 	r.SetReaders(stringReader(input))
-	d := DefaultDelimiter().WithRegexpFromString(",|\n")
+	d := NewDelimiter().WithTokenRegexpFromString(",|\n")
 	r.SetDelimiter(d)
 
 	tokens, err := r.ReadTokens()

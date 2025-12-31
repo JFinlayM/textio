@@ -68,12 +68,10 @@ type TokenReaderStreamer interface {
 // The tokens read with [Reader] are either seperate with a string delimiter [delimiterStr] or a regular expression [delimiter]
 type Reader struct {
 	// The reader(s) from where we read tokens
-	reader io.Reader
-	// delimiter is for the seperation of the tokens.
-	delimiter *Delimiter
-	// endDelimiter is used to stop scanning. Keep in mind that in order to stop scanning the input NEEDS the [delimiter] followed by [endDelimiter].
-	// For example: input = "hello\nworld\nend", returns ["hello", "world"] if delimiter = "\n" and endDelimiter = "end".
-	endDelimiter  *Delimiter
+	reader       io.Reader
+	MaxTokenSize int
+	// delimiter is for the seperation of the tokens and to stop scanning.
+	delimiter     *Delimiter
 	normalize     NormalizeFunc
 	filter        FilterFunc
 	FailOnError   bool
@@ -90,10 +88,11 @@ type Reader struct {
 // provided setter methods before reading.
 func NewReader() *Reader {
 	return &Reader{
-		reader:      os.Stdin,
-		delimiter:   DefaultDelimiter(),
-		normalize:   NormalizeTrimSpace,
-		FailOnError: true,
+		reader:       os.Stdin,
+		delimiter:    DefaultDelimiter(),
+		normalize:    NormalizeTrimSpace,
+		FailOnError:  true,
+		MaxTokenSize: bufio.MaxScanTokenSize,
 	}
 }
 
@@ -126,16 +125,6 @@ func (r *Reader) FromBytes(b []byte) *Reader {
 func (r *Reader) WithDelimiter(d *Delimiter) *Reader {
 	newR := *r
 	newR.SetDelimiter(d)
-	return &newR
-}
-
-// WithEndDelimiter returns a shallow copy of the [Reader]
-// configured with the given delimiter regular expression.
-//
-// The original [Reader] is not modified.
-func (r *Reader) WithEndDelimiter(d *Delimiter) *Reader {
-	newR := *r
-	newR.SetEndDelimiter(d)
 	return &newR
 }
 
@@ -199,12 +188,6 @@ func (r *Reader) SetDelimiter(d *Delimiter) {
 	r.delimiter = d
 }
 
-// Sets the delimiter used to seperate input into tokens.
-// This resets the [delimiterStr] field of r.
-func (r *Reader) SetEndDelimiter(d *Delimiter) {
-	r.endDelimiter = d
-}
-
 // Sets the function to be called to normalize current read token before passing through filter function. There is none by default.
 func (r *Reader) SetNormalizer(normalizeFunc NormalizeFunc) {
 	r.normalize = normalizeFunc
@@ -234,17 +217,14 @@ func (r *Reader) SetFilter(filterFunc FilterFunc) {
 //   - If an error occurs during scanning and FailOnError is true, the function returns the error.
 func (r *Reader) ReadTokens() ([]string, error) {
 	var tokens []string
-
 	scanner := bufio.NewScanner(r.reader)
+	buf := make([]byte, 0, r.MaxTokenSize)
+	scanner.Buffer(buf, r.MaxTokenSize)
 	scanner.Split(r.delimiter.SplitFunc())
 
 	n := 0
 	for scanner.Scan() {
 		token := scanner.Text()
-		if r.endDelimiter != nil && r.endDelimiter.MatchString(token) {
-			break
-		}
-
 		if r.normalize != nil {
 			token = r.normalize(token)
 		}
@@ -277,7 +257,7 @@ func (r *Reader) ReadTokens() ([]string, error) {
 //   - err: [ErrRead] if any issues occur during reading
 func (r *Reader) Read(p []byte) (n int, err error) {
 	n, err = r.reader.Read(p)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		err = newErrRead(err)
 	}
 	return n, err
@@ -315,10 +295,6 @@ func (r *Reader) StreamTokens(ctx context.Context, out chan string) error {
 	n := 0
 	for scanner.Scan() {
 		token := scanner.Text()
-
-		if r.endDelimiter != nil && r.endDelimiter.MatchString(token) {
-			return nil
-		}
 
 		if r.normalize != nil {
 			token = r.normalize(token)
