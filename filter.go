@@ -13,8 +13,8 @@ type FilterFunc func(s string) bool
 //
 // The input string is trimmed using strings.TrimSpace before evaluation.
 // If the resulting string is empty, the token is rejected.
-func FilterNonEmpty(s string) bool {
-	return strings.TrimSpace(s) != ""
+func FilterNonEmpty(s string) FilterFunc {
+	return func(s string) bool { return strings.TrimSpace(s) != "" }
 }
 
 // FilterMinLength returns a FilterFunc that accepts only strings
