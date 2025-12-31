@@ -7,6 +7,34 @@ import (
 	"strings"
 )
 
+// TokenReaderCloser extends TokenReader with explicit resource management.
+//
+// Implementations typically own one or more underlying resources
+// (such as files or network connections) that must be released
+// when Close is called.
+type TokenReaderCloser interface {
+	TokenReader
+	io.Closer
+}
+
+// TokenStreamerCloser extends TokenStreamer with explicit resource management.
+//
+// Implementations must release all owned resources when Close is called.
+type TokenStreamerCloser interface {
+	TokenStreamer
+	io.Closer
+}
+
+// TokenReaderStreamerCloser combines batch reading, streaming,
+// and explicit resource management.
+//
+// This is the most complete contract and is typically implemented
+// by types that own resources and support both access patterns.
+type TokenReaderStreamerCloser interface {
+	TokenReaderStreamer
+	io.Closer
+}
+
 // [ReaderCloser] reads tokens from an io.Reader and optionally applies
 // normalization and filtering before returning them.
 //

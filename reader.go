@@ -22,6 +22,45 @@ import (
 	"strings"
 )
 
+// TokenReader defines the minimal contract for reading tokens
+// from an input source in a batch-oriented manner.
+//
+// Implementations return all available tokens at once and may
+// apply tokenization, normalization, and validation logic
+// according to their configuration.
+type TokenReader interface {
+	// ReadTokens reads and returns all available tokens from the input source.
+	//
+	// The returned slice contains the tokens in the order they were read.
+	// An error is returned if tokenization, validation, or reading fails.
+	ReadTokens() ([]string, error)
+}
+
+// TokenStreamer defines the contract for streaming tokens
+// from an input source to a channel.
+//
+// Implementations must respect context cancellation and stop
+// streaming immediately when the context is done.
+type TokenStreamer interface {
+	// StreamTokens streams tokens from the input source to the provided channel.
+	//
+	// Tokens are sent sequentially to the `out` channel until the input
+	// is exhausted, an error occurs, or the provided context is canceled.
+	//
+	// If the context is canceled, StreamTokens must return immediately
+	// with ctx.Err().
+	StreamTokens(ctx context.Context, out chan string) error
+}
+
+// TokenReaderStreamer groups batch-oriented and streaming token access.
+//
+// Types implementing this interface support both full reads
+// and incremental streaming of tokens from the same input source.
+type TokenReaderStreamer interface {
+	TokenReader
+	TokenStreamer
+}
+
 // [Reader] reads tokens from an io.Reader and optionally applies
 // normalization and filtering before returning them.
 //
